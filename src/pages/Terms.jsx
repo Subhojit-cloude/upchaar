@@ -116,14 +116,6 @@ export default function TermsPage() {
                             </p>
 
                             <hr className="my-8 border-slate-200" />
-
-                            <h2>Privacy Policy</h2>
-                            <p>
-                                We value your privacy. Please read our complete privacy policy to understand how we collect, use, and share your information.
-                            </p>
-                            <Link to="/privacy-policy" className="inline-flex items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-teal-700 bg-teal-100 hover:bg-teal-200 mt-4 no-underline">
-                                Read Full Privacy Policy
-                            </Link>
                         </div>
                     </div>
                 </div>
