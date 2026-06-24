@@ -144,7 +144,7 @@ export async function uploadPrescription(file, userId) {
     const path = `${userId}_${timestamp}.${ext}`; // Removed 'prescriptions/' prefix as bucket is dedicated
 
     const { error: uploadError } = await supabase.storage
-        .from('diagpresciption')
+        .from('diagnostic_prescriptions')
         .upload(path, file, {
             contentType: file.type,
             upsert: false,
@@ -155,6 +155,6 @@ export async function uploadPrescription(file, userId) {
         throw new Error('Failed to upload prescription. Please try again.');
     }
 
-    const { data } = supabase.storage.from('diagpresciption').getPublicUrl(path);
+    const { data } = supabase.storage.from('diagnostic_prescriptions').getPublicUrl(path);
     return data.publicUrl;
 }
