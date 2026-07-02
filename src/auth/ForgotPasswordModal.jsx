@@ -170,10 +170,12 @@ export default function ForgotPasswordModal({ onClose }) {
         setOtpLoading(true);
         setOtpError('');
         try {
-            // Verify only — don't reset password yet (user needs to enter new password)
-            // We call the verify function with a sentinel password to just check the OTP
-            // Actually, we'll do a lightweight check: call the edge function but with a flag
-            // Instead, we move to step 3 and verify + set password together in one call
+            // Verify only — check if OTP is correct before asking for new password
+            await callEdgeFunction('verify-forgot-password-otp', {
+                email: email.trim(),
+                otp: token,
+            });
+            // If successful, move to step 3
             setStep('password');
         } catch (err) {
             setOtpError(err.message || 'Verification failed.');
