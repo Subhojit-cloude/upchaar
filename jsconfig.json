@@ -5,6 +5,10 @@
             "@/*": [
                 "./src/*"
             ]
-        }
-    }
+    },
+    "exclude": [
+        "node_modules",
+        "dist",
+        "supabase"
+    ]
 }
