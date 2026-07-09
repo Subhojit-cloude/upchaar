@@ -68,9 +68,6 @@ export default function PrivacyPolicyPage() {
                             <li><strong>Email:</strong> <a href="mailto:mainupchaarhealth@gmail.com">mainupchaarhealth@gmail.com</a></li>
                             <li><strong>Response Time:</strong> We are committed to addressing all privacy-related concerns within 15 days of receipt.</li>
                         </ul>
-                        <p className="text-sm text-slate-500 mt-4 italic">
-                            (Disclaimer: As an AI, I provide this as a structural template. You should have a legal professional review this policy to ensure it perfectly aligns with your specific technical architecture and local data protection regulations.)
-                        </p>
                     </div>
                 </div>
             </div>

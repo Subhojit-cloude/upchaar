@@ -55,6 +55,7 @@ const BookAppointmentQueued = lazy(() => import('@/pages/BookAppointmentQueued.j
 const BlogPostPage    = lazy(() => import('@/pages/BlogPost.jsx'));
 const TermsPage       = lazy(() => import('@/pages/Terms.jsx'));
 const PrivacyPolicyPage = lazy(() => import('@/pages/PrivacyPolicy.jsx'));
+const SupportPage       = lazy(() => import('@/pages/Support.jsx'));
 
 // ── PATIENT pages ─────────────────────────────────────
 const PatientLogin     = lazy(() => import('@/patient/pages/PatientLogin.jsx'));
@@ -166,6 +167,7 @@ export function AppRoutes() {
             <Route path="/blogs/:slug" element={<BlogPostPage />} />
             <Route path="/terms" element={<TermsPage />} />
             <Route path="/privacy-policy" element={<PrivacyPolicyPage />} />
+            <Route path="/support" element={<SupportPage />} />
 
 
             {/* ═══════════════════════════════════════

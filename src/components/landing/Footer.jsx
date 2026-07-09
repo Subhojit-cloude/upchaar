@@ -29,7 +29,7 @@ export const Footer = () => {
         ],
         "For Corporates": [{ title: "Wellness program", href: "#" }],
         "More": [
-            { title: "Help & Support", href: "/terms" },
+            { title: "Help & Support", href: "/support" },
             { title: "Developers", href: "#" },
             { title: "Privacy Policy", href: "/privacy-policy" },
             { title: "Terms and Conditions", href: "/terms" },
