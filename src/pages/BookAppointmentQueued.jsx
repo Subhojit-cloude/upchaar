@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { 
     Search, MapPin, Calendar as CalendarIcon, Clock, 
     Filter, ArrowRight, CheckCircle, ChevronLeft, 
-    Stethoscope, Info, AlertCircle, Loader2 
+    Stethoscope, Info, AlertCircle, Loader2, Building2
 } from 'lucide-react';
 import { toast, Toaster } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -12,8 +12,12 @@ import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
+import Skeleton from 'react-loading-skeleton';
+import 'react-loading-skeleton/dist/skeleton.css';
 import { supabase } from '@/lib/supabase.js';
 import { useAuth } from '@/auth/AuthContext.jsx';
+import { getStorageUrl } from '@/lib/uploadImage.js';
+import RazorpayCheckout from '@/components/RazorpayCheckout.jsx';
 
 // ── Static Data ──────────────────────────────────────
 // Constants will be fetched dynamically
@@ -22,13 +26,16 @@ export default function BookAppointmentQueued() {
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
     const { user, loading: authLoading } = useAuth();
+    const doctorIdParam = searchParams.get('doctorId');
+    const clinicIdParam = searchParams.get('clinicId');
     
     useEffect(() => {
         if (!authLoading && !user) {
-            navigate('/login', { state: { from: '/book-appointment-queued' } });
+            const returnTo = `/book-appointment-queued${searchParams.toString() ? `?${searchParams.toString()}` : ''}`;
+            navigate('/login', { state: { from: returnTo } });
             toast.error("You must be logged in to book a queued appointment.");
         }
-    }, [user, authLoading, navigate]);
+    }, [user, authLoading, navigate, searchParams]);
 
     // ── Search & Filter State ────────────────────────
     const [selectedState, setSelectedState] = useState('');
@@ -41,6 +48,7 @@ export default function BookAppointmentQueued() {
     const [loading, setLoading] = useState(true);
     const [selectedDoctor, setSelectedDoctor] = useState(null);
     const [clinics, setClinics] = useState([]);
+    const [clinicsLoading, setClinicsLoading] = useState(false);
     const [selectedClinic, setSelectedClinic] = useState(null);
     const [selectedDate, setSelectedDate] = useState('');
     const [selectedSlot, setSelectedSlot] = useState('');
@@ -50,7 +58,7 @@ export default function BookAppointmentQueued() {
     const [availableScheduleDays, setAvailableScheduleDays] = useState([]);
     
     // ── UI Flow State ────────────────────────────────
-    const [step, setStep] = useState(1); // 1: Search, 2: Clinic/Slot, 3: Details & OTP, 4: Payment, 5: Confirmation
+    const [step, setStep] = useState(doctorIdParam ? 2 : 1); // 1: Search, 2: Clinic/Slot, 3: Details & OTP, 4: Payment, 5: Confirmation
     const [bookingLoading, setBookingLoading] = useState(false);
     const [bookingSuccess, setBookingSuccess] = useState(false);
 
@@ -190,9 +198,11 @@ export default function BookAppointmentQueued() {
     const handleSelectDoctor = async (doc) => {
         setSelectedDoctor(doc);
         setLoading(true);
+        setClinicsLoading(true);
         setSelectedClinic(null);
         setSelectedDate('');
         setSelectedSlot('');
+        setClinics([]);
         
         // Fetch linked clinics via staff_links
         const { data: staffData, error: staffError } = await supabase
@@ -202,19 +212,66 @@ export default function BookAppointmentQueued() {
 
         if (!staffError && staffData && staffData.length > 0) {
             const orgPromises = staffData.map(async (link) => {
-                const table = link.organization_type === 'medical' ? 'medicals' : 'clinics';
-                const { data, error } = await supabase
-                    .from(table)
-                    .select('*')
-                    .eq('profile_id', link.organization_id)
-                    .maybeSingle();
-                
-                if (error) console.error(`Error fetching from ${table}:`, error);
-                return data ? { ...data, organization_type: link.organization_type } : null;
+                const orgId = link.organization_id;
+                const orgType = link.organization_type;
+                const table = orgType === 'medical' ? 'medicals' : 'clinics';
+                const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(orgId));
+
+                let data = null;
+
+                // Strategy 1: If UUID, try matching via profile_id column
+                if (isUUID) {
+                    const { data: d1 } = await supabase
+                        .from(table)
+                        .select('*')
+                        .eq('profile_id', orgId)
+                        .maybeSingle();
+                    data = d1 || null;
+                }
+
+                // Strategy 2: If still no data, try matching via id column directly
+                if (!data) {
+                    const { data: d2 } = await supabase
+                        .from(table)
+                        .select('*')
+                        .eq('id', orgId)
+                        .maybeSingle();
+                    data = d2 || null;
+                }
+
+                // Strategy 3: Fall back to profiles table (covers cases where no internal row exists)
+                if (!data && isUUID) {
+                    const { data: profileData } = await supabase
+                        .from('profiles')
+                        .select('id, full_name, name, city, state, phone')
+                        .eq('id', orgId)
+                        .maybeSingle();
+
+                    if (profileData) {
+                        data = {
+                            id: profileData.id,
+                            name: profileData.full_name || profileData.name || 'Unnamed Facility',
+                            address: [profileData.city, profileData.state].filter(Boolean).join(', ') || '',
+                            phone: profileData.phone || '',
+                        };
+                    }
+                }
+
+                if (!data) return null;
+
+                // Ensure the name field is always populated (clinics table uses 'name', not 'full_name')
+                const name = data.name || data.full_name || 'Unnamed Facility';
+                return { ...data, name, organization_type: orgType };
             });
+
             const list = (await Promise.all(orgPromises)).filter(Boolean);
             setClinics(list);
-            if (list.length > 0) setSelectedClinic(list[0]);
+            if (list.length > 0) {
+                const desiredClinic = clinicIdParam
+                    ? list.find(c => String(c.id) === String(clinicIdParam))
+                    : null;
+                setSelectedClinic(desiredClinic || list[0]);
+            }
         } else {
             setClinics([]);
         }
@@ -230,11 +287,17 @@ export default function BookAppointmentQueued() {
             setDoctorTimetables(ttData || []);
         }
 
+        setClinicsLoading(false);
         setLoading(false);
         setStep(2);
     };
 
     // ── Navigation & Actions ─────────────────────────
+    const baseFee = selectedDoctor?.consultation_fee ?? selectedDoctor?.fees ?? 500;
+    const bookingCharge = selectedDoctor?.booking_charges || 0;
+    const platformFee = selectedDoctor?.platform_fee || 0;
+    const totalFee = baseFee + bookingCharge + platformFee;
+
     const handleConfirmSlots = () => {
         if (user) {
             setStep(4); // Skip OTP for logged-in users
@@ -253,22 +316,174 @@ export default function BookAppointmentQueued() {
         }, 1500);
     };
 
-    const handleConfirmBooking = async () => {
-        setBookingLoading(true);
-        
+    const handleValidateBooking = async () => {
         try {
-            // Calculate real queue number: count existing appointments for same doctor + org + date + slot
-            const { count, error: countError } = await supabase
+            // Helper functions for time parsing
+            const parseTimeToMinutes = (timeStr) => {
+                if (!timeStr) return 0;
+                const [time, ampm] = timeStr.split(' ');
+                if (!time || !ampm) return 0;
+                let [h, m] = time.split(':').map(Number);
+                if (ampm === 'PM' && h !== 12) h += 12;
+                if (ampm === 'AM' && h === 12) h = 0;
+                return h * 60 + m;
+            };
+
+            const parseTimetableTime = (timeStr) => {
+                if (!timeStr) return 0;
+                let [h, m] = timeStr.split(':').map(Number);
+                return h * 60 + m;
+            };
+
+            // 1. Determine current timetable range
+            const slotMin = parseTimeToMinutes(selectedSlot);
+            const dStr = new Date(selectedDate).toLocaleDateString('en-US', { weekday: 'long' });
+            const matchedOrgId = selectedClinic?.id;
+            const matchedRanges = doctorTimetables.filter(t => t.org_id === matchedOrgId && t.day === dStr);
+
+            let currentRange = null;
+            for (const range of matchedRanges) {
+                const startMin = parseTimetableTime(range.time_from);
+                const endMin = parseTimetableTime(range.time_to);
+                if (slotMin >= startMin && slotMin < endMin) {
+                    currentRange = range;
+                    break;
+                }
+            }
+
+            // 2. Fetch all appointments for the day to check duplicates AND calculate queue
+            let dayAppointmentsQuery = supabase
                 .from('appointments')
-                .select('id', { count: 'exact', head: true })
+                .select('id, time_slot, patient_id')
                 .eq('doctor_id', selectedDoctor.id)
-                .eq('organization_id', selectedClinic?.id)
                 .eq('date', selectedDate)
-                .eq('time_slot', selectedSlot);
+                .neq('status', 'Cancelled');
 
-            const realQueueNumber = countError ? 1 : (count ?? 0) + 1;
+            if (selectedClinic?.id) {
+                dayAppointmentsQuery = dayAppointmentsQuery.eq('organization_id', selectedClinic.id);
+            } else {
+                dayAppointmentsQuery = dayAppointmentsQuery.is('organization_id', null);
+            }
 
-            // Sync to appointments table
+            const { data: dayAppointments, error: dayAppointmentsError } = await dayAppointmentsQuery;
+
+            if (dayAppointmentsError) throw dayAppointmentsError;
+
+            // 3. Check for duplicates in the same range
+            let isDuplicate = false;
+            const existingAppts = dayAppointments || [];
+
+            if (currentRange) {
+                const startMin = parseTimetableTime(currentRange.time_from);
+                const endMin = parseTimetableTime(currentRange.time_to);
+                
+                for (const app of existingAppts) {
+                    const appMin = parseTimeToMinutes(app.time_slot);
+                    if (appMin >= startMin && appMin < endMin) {
+                        // Check if it's the same patient
+                        if (user?.id && app.patient_id === user.id) {
+                            isDuplicate = true;
+                        }
+                    }
+                }
+            } else {
+                // Fallback if no range found: check exact time slot
+                for (const app of existingAppts) {
+                    if (app.time_slot === selectedSlot) {
+                        if (user?.id && app.patient_id === user.id) {
+                            isDuplicate = true;
+                        }
+                    }
+                }
+            }
+
+            if (isDuplicate) {
+                toast.error('You have already booked the appointment', {
+                    description: 'You cannot book another appointment with this doctor in the same time block.',
+                });
+                return false;
+            }
+            return true;
+        } catch (err) {
+            console.error('Validation error:', err);
+            toast.error(`Validation failed: ${err?.message || 'Please try again.'}`);
+            return false;
+        }
+    };
+
+    const handlePaymentSuccess = async () => {
+        setBookingLoading(true);
+        try {
+            // Helper functions for time parsing
+            const parseTimeToMinutes = (timeStr) => {
+                if (!timeStr) return 0;
+                const [time, ampm] = timeStr.split(' ');
+                if (!time || !ampm) return 0;
+                let [h, m] = time.split(':').map(Number);
+                if (ampm === 'PM' && h !== 12) h += 12;
+                if (ampm === 'AM' && h === 12) h = 0;
+                return h * 60 + m;
+            };
+
+            const parseTimetableTime = (timeStr) => {
+                if (!timeStr) return 0;
+                let [h, m] = timeStr.split(':').map(Number);
+                return h * 60 + m;
+            };
+
+            const slotMin = parseTimeToMinutes(selectedSlot);
+            const dStr = new Date(selectedDate).toLocaleDateString('en-US', { weekday: 'long' });
+            const matchedOrgId = selectedClinic?.id;
+            const matchedRanges = doctorTimetables.filter(t => t.org_id === matchedOrgId && t.day === dStr);
+
+            let currentRange = null;
+            for (const range of matchedRanges) {
+                const startMin = parseTimetableTime(range.time_from);
+                const endMin = parseTimetableTime(range.time_to);
+                if (slotMin >= startMin && slotMin < endMin) {
+                    currentRange = range;
+                    break;
+                }
+            }
+
+            // Calculate queue
+            let dayAppointmentsQuery = supabase
+                .from('appointments')
+                .select('id, time_slot, patient_id')
+                .eq('doctor_id', selectedDoctor.id)
+                .eq('date', selectedDate)
+                .neq('status', 'Cancelled');
+
+            if (selectedClinic?.id) {
+                dayAppointmentsQuery = dayAppointmentsQuery.eq('organization_id', selectedClinic.id);
+            } else {
+                dayAppointmentsQuery = dayAppointmentsQuery.is('organization_id', null);
+            }
+
+            const { data: dayAppointments } = await dayAppointmentsQuery;
+            
+            let queueCount = 0;
+            const existingAppts = dayAppointments || [];
+
+            if (currentRange) {
+                const startMin = parseTimetableTime(currentRange.time_from);
+                const endMin = parseTimetableTime(currentRange.time_to);
+                for (const app of existingAppts) {
+                    const appMin = parseTimeToMinutes(app.time_slot);
+                    if (appMin >= startMin && appMin < endMin) {
+                        queueCount++;
+                    }
+                }
+            } else {
+                for (const app of existingAppts) {
+                    if (app.time_slot === selectedSlot) {
+                        queueCount++;
+                    }
+                }
+            }
+
+            const realQueueNumber = queueCount + 1;
+
             const appointmentData = {
                 patient_id: user?.id || null,
                 patient_name: patientInfo.name,
@@ -280,12 +495,13 @@ export default function BookAppointmentQueued() {
                 time_slot: selectedSlot,
                 status: 'Confirmed',
                 type: 'In-person',
-                fee: selectedDoctor.fees || 500,
+                fee: totalFee,
+                platform_revenue: platformFee,
                 queue_number: realQueueNumber,
                 specialization: selectedDoctor.specialization
             };
 
-            const { error } = await supabase.from('appointments').insert([appointmentData]);
+            let { error } = await supabase.from('appointments').insert([appointmentData]);
         
             if (!error) {
                 setBookingSuccess(true);
@@ -296,11 +512,19 @@ export default function BookAppointmentQueued() {
                 setStep(5);
             } else {
                 console.error("Booking error:", error);
-                toast.error("Error booking appointment. Please try again.");
+                if (error?.code === '23505' || error?.message?.toLowerCase().includes('duplicate')) {
+                    toast.error('You have already booked the appointment');
+                } else {
+                    toast.error(`Booking failed: ${error?.message || 'Unknown error'}`);
+                }
             }
         } catch (err) {
-            console.error("Unexpected error:", err);
-            toast.error("Something went wrong. Please try again.");
+            console.error('Unexpected booking error:', err);
+            if (err?.code === '23505' || err?.message?.toLowerCase().includes('duplicate')) {
+                toast.error('You have already booked the appointment');
+            } else {
+                toast.error(`Booking failed: ${err?.message || 'Something went wrong. Please try again.'}`);
+            }
         } finally {
             setBookingLoading(false);
         }
@@ -357,6 +581,19 @@ export default function BookAppointmentQueued() {
         }));
     }, [selectedClinic, doctorTimetables]);
 
+    const showDeepLinkLoader = authLoading || (doctorIdParam && !selectedDoctor && loading);
+
+    if (showDeepLinkLoader) {
+        return (
+            <div className="min-h-screen bg-slate-50 flex items-center justify-center px-4">
+                <div className="flex flex-col items-center gap-3 text-center">
+                    <Loader2 className="h-8 w-8 animate-spin text-teal-500" />
+                    <p className="text-sm font-semibold text-slate-600">Preparing appointment slots...</p>
+                </div>
+            </div>
+        );
+    }
+
     return (
         <div className="min-h-screen bg-slate-50 py-12 px-4 sm:px-8">
                 <div className="max-w-6xl mx-auto space-y-8">
@@ -368,7 +605,11 @@ export default function BookAppointmentQueued() {
                                 if (step === 2) {
                                     navigate('/doctors');
                                 } else {
-                                    setStep(step - 1);
+                                    if (step === 4 && user) {
+                                        setStep(2);
+                                    } else {
+                                        setStep(step - 1);
+                                    }
                                 }
                             }}>
                                 <ChevronLeft className="h-6 w-6" />
@@ -479,7 +720,7 @@ export default function BookAppointmentQueued() {
                                                         <div className="flex items-start gap-4">
                                                             <div className="h-16 w-16 rounded-2xl bg-slate-100 flex items-center justify-center text-slate-500 text-2xl font-bold overflow-hidden border-2 border-white shadow-sm">
                                                                 {doc.avatar_url ? (
-                                                                    <img src={doc.avatar_url} alt={doc.full_name} className="w-full h-full object-cover" />
+                                                                    <img src={getStorageUrl(doc.avatar_url, 'doctor-avtar')} alt={doc.full_name} className="w-full h-full object-cover" />
                                                                 ) : doc.full_name?.[0]}
                                                             </div>
                                                             <div className="flex-1">
@@ -492,7 +733,9 @@ export default function BookAppointmentQueued() {
                                                             </div>
                                                         </div>
                                                         <div className="pt-4 border-t flex items-center justify-between">
-                                                            <span className="text-sm font-bold text-slate-700">₹{doc.fees || 500} <span className="text-slate-400 font-normal">Fee</span></span>
+                                                            <div className="flex flex-col">
+                                                                <span className="text-sm font-bold text-slate-700">₹{(doc.consultation_fee ?? doc.fees ?? 500) + (doc.booking_charges || 0) + (doc.platform_fee || 0)} <span className="text-slate-400 font-normal">Fee</span></span>
+                                                            </div>
                                                             <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700 group">
                                                                 Book Now
                                                                 <ArrowRight className="ml-1 h-3 w-3 group-hover:translate-x-1 transition-transform" />
@@ -535,7 +778,7 @@ export default function BookAppointmentQueued() {
                                         <CardContent className="p-6 text-center space-y-4">
                                             <div className="h-24 w-24 rounded-full bg-slate-100 mx-auto border-4 border-white shadow-md overflow-hidden">
                                                 {selectedDoctor.avatar_url ? (
-                                                    <img src={selectedDoctor.avatar_url} alt={selectedDoctor.full_name} className="w-full h-full object-cover" />
+                                                    <img src={getStorageUrl(selectedDoctor.avatar_url, 'doctor-avtar')} alt={selectedDoctor.full_name} className="w-full h-full object-cover" />
                                                 ) : <div className="h-full w-full flex items-center justify-center text-3xl font-bold text-slate-400">{selectedDoctor.full_name?.[0]}</div>}
                                             </div>
                                             <div>
@@ -550,8 +793,17 @@ export default function BookAppointmentQueued() {
                                                 <div className="w-[1px] bg-slate-100" />
                                                 <div className="text-center">
                                                     <p className="text-xs text-slate-400 font-bold uppercase">Consultation</p>
-                                                    <p className="font-bold">₹{selectedDoctor.fees || 500}</p>
+                                                    <p className="font-bold">₹{baseFee}</p>
                                                 </div>
+                                                {(bookingCharge > 0 || platformFee > 0) && (
+                                                    <>
+                                                        <div className="w-[1px] bg-slate-100" />
+                                                        <div className="text-center">
+                                                            <p className="text-xs text-slate-400 font-bold uppercase">Total Fee</p>
+                                                            <p className="font-bold text-emerald-600">₹{totalFee}</p>
+                                                        </div>
+                                                    </>
+                                                )}
                                             </div>
                                         </CardContent>
                                     </Card>
@@ -580,34 +832,55 @@ export default function BookAppointmentQueued() {
                                             <CardTitle className="text-xl">Practice & Time Slot</CardTitle>
                                         </CardHeader>
                                         <CardContent className="p-6 space-y-8">
-                                            {/* Clinic Selection */}
+                                            {/* Clinic / Medical Selection */}
                                             <div className="space-y-4">
                                                 <label className="text-sm font-bold text-slate-500 uppercase flex items-center gap-2">
-                                                    <MapPin size={16} /> Select Clinic / Hospital
+                                                    <MapPin size={16} /> Select Linked Clinic / Medical
                                                 </label>
                                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                                    {clinics.length > 0 ? clinics.map((clinic) => (
-                                                        <div 
+                                                    {clinicsLoading ? (
+                                                        // Skeleton cards while fetching
+                                                        Array(2).fill(0).map((_, i) => (
+                                                            <div key={i} className="p-4 rounded-2xl border-2 border-slate-100 space-y-2">
+                                                                <Skeleton height={16} width="70%" borderRadius={8} />
+                                                                <Skeleton height={12} width="50%" borderRadius={8} />
+                                                            </div>
+                                                        ))
+                                                    ) : clinics.length > 0 ? clinics.map((clinic) => (
+                                                        <div
                                                             key={clinic.id}
                                                             onClick={() => setSelectedClinic(clinic)}
                                                             className={`p-4 rounded-2xl border-2 transition-all cursor-pointer ${
-                                                                selectedClinic?.id === clinic.id 
-                                                                ? 'border-blue-600 bg-blue-50/50 shadow-md' 
+                                                                selectedClinic?.id === clinic.id
+                                                                ? 'border-blue-600 bg-blue-50/50 shadow-md'
                                                                 : 'border-slate-100 hover:border-slate-200'
                                                             }`}
                                                         >
-                                                            <div className="flex items-start justify-between">
-                                                                <div>
-                                                                    <p className="font-bold text-slate-900">{clinic.name}</p>
-                                                                    <p className="text-xs text-slate-500 line-clamp-2 mt-1">{clinic.address}</p>
+                                                            <div className="flex items-start justify-between gap-3">
+                                                                <div className="flex items-start gap-3">
+                                                                    <div className="mt-0.5 h-8 w-8 rounded-lg bg-blue-50 flex items-center justify-center text-blue-600 flex-shrink-0">
+                                                                        <Building2 size={16} />
+                                                                    </div>
+                                                                    <div>
+                                                                        <p className="font-bold text-slate-900 text-sm">{clinic.name}</p>
+                                                                        <p className="text-xs text-slate-500 line-clamp-2 mt-0.5">{clinic.address || clinic.city || 'Facility'}</p>
+                                                                        <span className="inline-block mt-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide bg-slate-100 text-slate-500">
+                                                                            {clinic.organization_type || 'clinic'}
+                                                                        </span>
+                                                                    </div>
                                                                 </div>
-                                                                {selectedClinic?.id === clinic.id && <CheckCircle className="h-5 w-5 text-blue-600 shrink-0" />}
+                                                                {selectedClinic?.id === clinic.id && <CheckCircle className="h-5 w-5 text-blue-600 shrink-0 mt-1" />}
                                                             </div>
                                                         </div>
                                                     )) : (
-                                                        <div className="col-span-full p-4 bg-amber-50 rounded-xl flex items-center gap-3 text-amber-700 text-sm">
-                                                            <Info size={18} />
-                                                            This doctor is currently not linked to any specific clinic.
+                                                        <div className="col-span-full p-5 bg-amber-50 border border-amber-200 rounded-2xl flex items-center gap-3 text-amber-700">
+                                                            <div className="h-10 w-10 rounded-xl bg-amber-100 flex items-center justify-center flex-shrink-0">
+                                                                <Info size={18} />
+                                                            </div>
+                                                            <div>
+                                                                <p className="font-bold text-sm">No linked facilities found</p>
+                                                                <p className="text-xs text-amber-600 mt-0.5">This doctor is not currently linked to any medical or clinic.</p>
+                                                            </div>
                                                         </div>
                                                     )}
                                                 </div>
@@ -618,9 +891,16 @@ export default function BookAppointmentQueued() {
                                                 <label className="text-sm font-bold text-slate-500 uppercase flex items-center gap-2">
                                                     <CalendarIcon size={16} /> Select Date
                                                 </label>
-                                                {daysWithSlots.size === 0 ? (
-                                                    <div className="text-sm text-amber-600 bg-amber-50 p-4 rounded-xl flex items-center gap-2 font-medium">
-                                                        <AlertCircle size={16} /> No schedule available for this clinic.
+                                                {clinicsLoading ? (
+                                                    // Skeleton date pills while loading
+                                                    <div className="flex gap-3">
+                                                        {Array(5).fill(0).map((_, i) => (
+                                                            <Skeleton key={i} width={64} height={80} borderRadius={16} />
+                                                        ))}
+                                                    </div>
+                                                ) : daysWithSlots.size === 0 ? (
+                                                    <div className="text-sm text-amber-600 bg-amber-50 border border-amber-200 p-4 rounded-xl flex items-center gap-2 font-medium">
+                                                        <AlertCircle size={16} /> No schedule set up for the selected clinic yet.
                                                     </div>
                                                 ) : (
                                                     <div className="flex gap-3 overflow-x-auto pb-2 no-scrollbar">
@@ -802,25 +1082,41 @@ export default function BookAppointmentQueued() {
                                             <div className="h-[1px] bg-slate-100 my-4" />
                                             <div className="flex justify-between items-center text-sm">
                                                 <span className="text-slate-500">Consultation Fee</span>
-                                                <span className="font-bold">₹{selectedDoctor.fees || 500}</span>
+                                                <span className="font-bold">₹{baseFee}</span>
                                             </div>
                                             <div className="flex justify-between items-center text-sm">
                                                 <span className="text-slate-500">Booking Charges</span>
-                                                <span className="font-bold">₹50</span>
+                                                <span className="font-bold">{bookingCharge === 0 ? 'FREE' : `₹${bookingCharge}`}</span>
+                                            </div>
+                                            <div className="flex justify-between items-center text-sm">
+                                                <span className="text-slate-500">Platform Fee</span>
+                                                <span className="font-bold">{platformFee === 0 ? 'FREE' : `₹${platformFee}`}</span>
                                             </div>
                                             <div className="flex justify-between items-center text-lg pt-4 border-t font-black">
                                                 <span className="text-slate-900">Total Payable</span>
-                                                <span className="text-blue-600">₹{(selectedDoctor.fees || 500) + 50}</span>
+                                                <span className="text-emerald-600">₹{totalFee}</span>
                                             </div>
                                         </div>
 
-                                        <Button 
-                                            className="w-full h-14 bg-emerald-600 hover:bg-emerald-700 text-white text-lg font-bold shadow-xl shadow-emerald-500/20"
-                                            onClick={handleConfirmBooking}
-                                            disabled={bookingLoading}
-                                        >
-                                            {bookingLoading ? <Loader2 className="animate-spin mr-2" /> : 'Confirm & Pay Now'}
-                                        </Button>
+                                        {bookingLoading ? (
+                                            <Button disabled className="w-full h-14 bg-emerald-600 opacity-50">
+                                                <Loader2 className="animate-spin mr-2" /> Processing...
+                                            </Button>
+                                        ) : (
+                                            <RazorpayCheckout 
+                                                amount={totalFee * 100} 
+                                                currency="INR"
+                                                receipt={`receipt_${new Date().getTime()}`}
+                                                onBeforePayment={handleValidateBooking}
+                                                onSuccess={handlePaymentSuccess}
+                                                onError={(err) => {
+                                                    toast.error('Payment Failed', { description: 'Your payment was not completed.' });
+                                                    setBookingLoading(false);
+                                                }}
+                                                className="w-full h-14 bg-emerald-600 hover:bg-emerald-700 text-white text-lg font-bold shadow-xl shadow-emerald-500/20 rounded-md"
+                                                buttonText="Pay Now & Confirm"
+                                            />
+                                        )}
                                         <p className="text-[10px] text-center text-slate-400">
                                             By clicking confirm, you agree to our terms of service and refund policy.
                                         </p>

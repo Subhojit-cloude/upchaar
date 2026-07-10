@@ -40,7 +40,7 @@ export default function BloggerLogin() {
                             <PenLine className="h-7 w-7 text-white" />
                         </div>
                         <h1 className="text-2xl font-bold text-slate-800">Blogger Portal</h1>
-                        <p className="text-sm text-slate-500 mt-1">Upchaar Health — Writer Access</p>
+                        <p className="text-sm text-slate-500 mt-1">Upchar Health — Writer Access</p>
                     </div>
 
                     <form onSubmit={handleSubmit} className="space-y-4">
@@ -48,7 +48,7 @@ export default function BloggerLogin() {
                             <label className="block text-sm font-medium text-slate-700 mb-1.5">Email or Phone Number</label>
                             <input type="text" required value={form.email}
                                 onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
-                                placeholder="email@upchaar.health or 9876543210"
+                                placeholder="email@upcharhealth.com or 9876543210"
                                 className="w-full h-11 px-3 rounded-xl border border-slate-200 bg-slate-50 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition" />
                         </div>
                         <div>
@@ -77,7 +77,7 @@ export default function BloggerLogin() {
 
                     <p className="text-center mt-4 text-xs text-slate-400">
                         Looking for admin?{' '}
-                        <Link to="/admin/login" className="text-primary hover:underline">Admin Portal →</Link>
+                        <a href={`${import.meta.env.VITE_ADMIN_URL || 'http://localhost:6001'}/admin/login`} className="text-primary hover:underline">Admin Portal →</a>
                     </p>
                 </div>
             </motion.div>

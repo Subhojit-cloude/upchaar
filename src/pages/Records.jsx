@@ -14,7 +14,6 @@ import {
     TabsList,
     TabsTrigger,
 } from '@/components/ui/tabs';
-import { healthRecords } from '@/lib/data';
 import { 
     Upload, 
     FileText, 
@@ -38,24 +37,67 @@ import {
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 
+import { usePatient } from '../patient/context/PatientContext.jsx';
+import { supabase } from '@/lib/supabase.js';
+import { useNavigate } from 'react-router-dom';
+
 export default function RecordsPage() {
+    const { patient } = usePatient();
+    const navigate = useNavigate();
     const [searchTerm, setSearchTerm] = useState('');
     const [formattedRecords, setFormattedRecords] = useState([]);
+    const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        setFormattedRecords(
-            healthRecords.map(record => ({
-                ...record,
-                date: new Date(record.date).toLocaleDateString('en-IN', {
-                    day: 'numeric',
-                    month: 'short',
-                    year: 'numeric'
-                }),
-                fullDate: new Date(record.date),
-                fileSize: (Math.random() * (5.0 - 0.5) + 0.5).toFixed(1) + ' MB' // Simulating file size
-            }))
-        );
-    }, []);
+        async function fetchRecords() {
+            if (!patient?.id) {
+                setLoading(false);
+                return;
+            }
+            
+            setLoading(true);
+            try {
+                const { data, error } = await supabase
+                    .from('appointments')
+                    .select('*')
+                    .eq('patient_id', patient.id)
+                    .eq('status', 'Completed')
+                    .order('date', { ascending: false });
+                    
+                if (error) throw error;
+                
+                if (data) {
+                    const validPrescriptions = data.filter(apt => 
+                        (apt.diagnosis && apt.diagnosis.trim() !== '') || 
+                        (apt.medicines && apt.medicines.length > 0) || 
+                        (apt.issue && apt.issue.trim() !== '')
+                    );
+                    
+                    const mappedRecords = validPrescriptions.map(apt => ({
+                        id: apt.id,
+                        name: `Prescription - ${apt.doctor_name || 'Doctor'}`,
+                        type: 'Prescription',
+                        date: new Date(apt.date).toLocaleDateString('en-IN', {
+                            year: 'numeric',
+                            month: 'short',
+                            day: 'numeric'
+                        }),
+                        fileSize: 'Digital PDF',
+                        rawDate: new Date(apt.date),
+                        doctorId: apt.doctor_id
+                    }));
+                    
+                    setFormattedRecords(mappedRecords);
+                }
+            } catch (err) {
+                console.error("Error fetching records:", err);
+            } finally {
+                setLoading(false);
+            }
+        }
+        
+        fetchRecords();
+    }, [patient?.id]);
 
     const filteredRecords = formattedRecords.filter(r => 
         r.name.toLowerCase().includes(searchTerm.toLowerCase())
@@ -65,91 +107,91 @@ export default function RecordsPage() {
     const testReports = filteredRecords.filter(r => r.type === 'Test Report');
 
     return (
-        <div className="space-y-8 max-w-7xl mx-auto pb-12">
+        <div className="space-y-4 sm:space-y-6 md:space-y-8 max-w-7xl mx-auto pb-8 md:pb-12">
             {/* Header Section */}
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 md:gap-6">
                 <div>
-                    <h1 className="text-3xl md:text-4xl font-extrabold tracking-tight font-headline text-slate-900 flex items-center gap-2">
-                        <Shield className="text-emerald-500 h-8 w-8" />
+                    <h1 className="text-2xl sm:text-3xl md:text-4xl font-extrabold tracking-tight font-headline text-slate-900 flex items-center gap-2">
+                        <Shield className="text-emerald-500 h-6 w-6 sm:h-8 sm:w-8 flex-shrink-0" />
                         Medical Vault
                     </h1>
-                    <p className="text-slate-500 text-lg mt-1 font-medium">Your health data, encrypted and accessible anywhere.</p>
+                    <p className="text-slate-500 text-sm sm:text-base md:text-lg mt-1 font-medium">Your health data, encrypted and accessible anywhere.</p>
                 </div>
-                <div className="flex items-center gap-3">
-                    <div className="relative group w-full md:w-64">
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3">
+                    <div className="relative group w-full sm:w-64">
                         <Search className="absolute left-3 top-3 h-4 w-4 text-slate-400 group-focus-within:text-emerald-500 transition-colors" />
                         <Input 
                             placeholder="Search records..." 
-                            className="pl-10 h-10 rounded-xl border-slate-200 bg-white/50 focus:bg-white transition-all shadow-sm"
+                            className="pl-10 h-10 rounded-xl border-slate-200 bg-white/50 focus:bg-white transition-all shadow-sm w-full"
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
                         />
                     </div>
-                    <Button className="rounded-xl h-10 px-5 bg-emerald-600 hover:bg-emerald-700 shadow-lg shadow-emerald-600/20 whitespace-nowrap">
+                    <Button className="rounded-xl h-10 px-5 bg-emerald-600 hover:bg-emerald-700 shadow-lg shadow-emerald-600/20 whitespace-nowrap w-full sm:w-auto">
                         <Upload className="mr-2 h-4 w-4" /> Upload
                     </Button>
                 </div>
             </div>
 
             {/* Quick Stats / Latest Activities */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <Card className="bg-gradient-to-br from-indigo-500 to-violet-600 border-none shadow-xl shadow-indigo-500/20 rounded-2xl text-white">
-                    <CardContent className="pt-6">
-                        <div className="flex items-center justify-between mb-4">
-                            <div className="h-10 w-10 rounded-xl bg-white/20 flex items-center justify-center">
-                                <History className="h-5 w-5" />
+            <div className="grid grid-cols-3 gap-3 sm:gap-4 md:gap-6">
+                <Card className="bg-gradient-to-br from-indigo-500 to-violet-600 border-none shadow-xl shadow-indigo-500/20 rounded-xl sm:rounded-2xl text-white">
+                    <CardContent className="p-3 sm:p-4 md:pt-6 md:px-6">
+                        <div className="flex items-center justify-between mb-2 sm:mb-4">
+                            <div className="h-8 w-8 sm:h-10 sm:w-10 rounded-lg sm:rounded-xl bg-white/20 flex items-center justify-center">
+                                <History className="h-4 w-4 sm:h-5 sm:w-5" />
                             </div>
-                            <Badge className="bg-white/20 text-white border-0">All Time</Badge>
+                            <Badge className="bg-white/20 text-white border-0 hidden sm:inline-flex">All Time</Badge>
                         </div>
-                        <div className="text-3xl font-bold mb-1">{formattedRecords.length}</div>
-                        <div className="text-sm text-indigo-100 font-medium">Total Records Stored</div>
+                        <div className="text-xl sm:text-2xl md:text-3xl font-bold mb-0.5 sm:mb-1">{formattedRecords.length}</div>
+                        <div className="text-[10px] sm:text-xs md:text-sm text-indigo-100 font-medium leading-tight">Total Records</div>
                     </CardContent>
                 </Card>
                 
-                <Card className="bg-white border-slate-100 shadow-lg shadow-slate-200/50 rounded-2xl">
-                    <CardContent className="pt-6">
-                        <div className="flex items-center justify-between mb-4">
-                            <div className="h-10 w-10 rounded-xl bg-blue-50 flex items-center justify-center text-blue-600">
-                                <FileText className="h-5 w-5" />
+                <Card className="bg-white border-slate-100 shadow-lg shadow-slate-200/50 rounded-xl sm:rounded-2xl">
+                    <CardContent className="p-3 sm:p-4 md:pt-6 md:px-6">
+                        <div className="flex items-center justify-between mb-2 sm:mb-4">
+                            <div className="h-8 w-8 sm:h-10 sm:w-10 rounded-lg sm:rounded-xl bg-blue-50 flex items-center justify-center text-blue-600">
+                                <FileText className="h-4 w-4 sm:h-5 sm:w-5" />
                             </div>
-                            <span className="text-xs text-slate-400 font-bold uppercase tracking-wider">Storage</span>
+                            <span className="text-[9px] sm:text-xs text-slate-400 font-bold uppercase tracking-wider hidden sm:inline">Storage</span>
                         </div>
-                        <div className="text-3xl font-bold mb-1 text-slate-900">{prescriptions.length}</div>
-                        <div className="text-sm text-slate-500 font-medium">Prescriptions Uploaded</div>
+                        <div className="text-xl sm:text-2xl md:text-3xl font-bold mb-0.5 sm:mb-1 text-slate-900">{prescriptions.length}</div>
+                        <div className="text-[10px] sm:text-xs md:text-sm text-slate-500 font-medium leading-tight">Prescriptions</div>
                     </CardContent>
                 </Card>
 
-                <Card className="bg-white border-slate-100 shadow-lg shadow-slate-200/50 rounded-2xl">
-                    <CardContent className="pt-6">
-                        <div className="flex items-center justify-between mb-4">
-                            <div className="h-10 w-10 rounded-xl bg-amber-50 flex items-center justify-center text-amber-600">
-                                <Clock className="h-5 w-5" />
+                <Card className="bg-white border-slate-100 shadow-lg shadow-slate-200/50 rounded-xl sm:rounded-2xl">
+                    <CardContent className="p-3 sm:p-4 md:pt-6 md:px-6">
+                        <div className="flex items-center justify-between mb-2 sm:mb-4">
+                            <div className="h-8 w-8 sm:h-10 sm:w-10 rounded-lg sm:rounded-xl bg-amber-50 flex items-center justify-center text-amber-600">
+                                <Clock className="h-4 w-4 sm:h-5 sm:w-5" />
                             </div>
-                            <span className="text-xs text-slate-400 font-bold uppercase tracking-wider">Reports</span>
+                            <span className="text-[9px] sm:text-xs text-slate-400 font-bold uppercase tracking-wider hidden sm:inline">Reports</span>
                         </div>
-                        <div className="text-3xl font-bold mb-1 text-slate-900">{testReports.length}</div>
-                        <div className="text-sm text-slate-500 font-medium">Lab Reports Available</div>
+                        <div className="text-xl sm:text-2xl md:text-3xl font-bold mb-0.5 sm:mb-1 text-slate-900">{testReports.length}</div>
+                        <div className="text-[10px] sm:text-xs md:text-sm text-slate-500 font-medium leading-tight">Lab Reports</div>
                     </CardContent>
                 </Card>
             </div>
 
             {/* Records Tabs */}
             <Tabs defaultValue="all" className="w-full">
-                <TabsList className="mb-6 p-1 bg-slate-100 rounded-xl h-11 w-full md:w-auto flex justify-start">
-                    <TabsTrigger value="all" className="rounded-lg px-6 data-[state=active]:bg-white data-[state=active]:shadow-sm">All Files</TabsTrigger>
-                    <TabsTrigger value="prescriptions" className="rounded-lg px-6 data-[state=active]:bg-white data-[state=active]:shadow-sm">Prescriptions</TabsTrigger>
-                    <TabsTrigger value="reports" className="rounded-lg px-6 data-[state=active]:bg-white data-[state=active]:shadow-sm">Test Reports</TabsTrigger>
+                <TabsList className="mb-4 sm:mb-6 p-1 bg-slate-100 rounded-xl h-10 sm:h-11 w-full md:w-auto flex justify-start overflow-x-auto scrollbar-none">
+                    <TabsTrigger value="all" className="rounded-lg px-3 sm:px-6 text-xs sm:text-sm data-[state=active]:bg-white data-[state=active]:shadow-sm flex-shrink-0">All Files</TabsTrigger>
+                    <TabsTrigger value="prescriptions" className="rounded-lg px-3 sm:px-6 text-xs sm:text-sm data-[state=active]:bg-white data-[state=active]:shadow-sm flex-shrink-0">Prescriptions</TabsTrigger>
+                    <TabsTrigger value="reports" className="rounded-lg px-3 sm:px-6 text-xs sm:text-sm data-[state=active]:bg-white data-[state=active]:shadow-sm flex-shrink-0">Test Reports</TabsTrigger>
                 </TabsList>
 
                 <AnimatePresence mode="wait">
                     <TabsContent value="all" className="mt-0">
-                        <RecordGrid records={filteredRecords} />
+                        <RecordGrid records={filteredRecords} navigate={navigate} />
                     </TabsContent>
                     <TabsContent value="prescriptions" className="mt-0">
-                        <RecordGrid records={prescriptions} />
+                        <RecordGrid records={prescriptions} navigate={navigate} />
                     </TabsContent>
                     <TabsContent value="reports" className="mt-0">
-                        <RecordGrid records={testReports} />
+                        <RecordGrid records={testReports} navigate={navigate} />
                     </TabsContent>
                 </AnimatePresence>
             </Tabs>
@@ -157,7 +199,7 @@ export default function RecordsPage() {
     );
 }
 
-function RecordGrid({ records }) {
+function RecordGrid({ records, navigate }) {
     if (records.length === 0) {
         return (
             <motion.div 
@@ -196,10 +238,10 @@ function RecordGrid({ records }) {
                                         </Button>
                                     </DropdownMenuTrigger>
                                     <DropdownMenuContent align="end" className="w-48 rounded-xl p-1.5">
-                                        <DropdownMenuItem className="rounded-lg gap-2 cursor-pointer">
+                                        <DropdownMenuItem className="rounded-lg gap-2 cursor-pointer" onClick={() => navigate(`/prescription/${record.id}`)}>
                                             <Eye className="h-4 w-4" /> View Details
                                         </DropdownMenuItem>
-                                        <DropdownMenuItem className="rounded-lg gap-2 cursor-pointer">
+                                        <DropdownMenuItem className="rounded-lg gap-2 cursor-pointer" onClick={() => window.open(`/prescription/${record.id}`, '_blank')}>
                                             <Download className="h-4 w-4" /> Download PDF
                                         </DropdownMenuItem>
                                         <DropdownMenuSeparator />
@@ -224,7 +266,7 @@ function RecordGrid({ records }) {
                                 <Clock className="h-3.5 w-3.5" />
                                 <span className="text-xs font-medium">{record.date}</span>
                             </div>
-                            <Button variant="ghost" size="sm" className="h-8 w-8 rounded-lg text-emerald-600 hover:bg-emerald-50 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <Button variant="ghost" size="sm" className="h-8 w-8 rounded-lg text-emerald-600 hover:bg-emerald-50 opacity-0 group-hover:opacity-100 transition-opacity" onClick={() => navigate(`/prescription/${record.id}`)}>
                                 <Download className="h-4 w-4" />
                             </Button>
                         </CardContent>

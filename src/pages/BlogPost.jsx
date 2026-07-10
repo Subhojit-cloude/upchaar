@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useBlog } from '@/blog/context/BlogContext.jsx';
 import { Heart, Eye, Clock, ArrowLeft, Share2, Calendar, Stethoscope, BookOpen } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 import { motion } from 'framer-motion';
+import DOMPurify from 'dompurify';
 
 function safeDate(val) {
     try { const d = new Date(val); return isNaN(d.getTime()) ? null : d; } catch { return null; }
@@ -15,6 +16,7 @@ export default function BlogPost() {
     const { publishedPosts, likePost, incrementViews } = useBlog();
     const [liked, setLiked]   = useState(false);
     const [copied, setCopied] = useState(false);
+    const viewedSlugRef = useRef(null);
 
     const post = publishedPosts.find(p => p.slug === slug);
     const related = publishedPosts.filter(p =>
@@ -23,7 +25,11 @@ export default function BlogPost() {
     ).slice(0, 3);
 
     useEffect(() => {
-        if (post) { incrementViews(post.id); window.scrollTo(0, 0); }
+        if (post && viewedSlugRef.current !== slug) {
+            incrementViews(post.id);
+            window.scrollTo(0, 0);
+            viewedSlugRef.current = slug;
+        }
     }, [slug, post, incrementViews]);
 
     const handleLike = () => {
@@ -137,7 +143,7 @@ export default function BlogPost() {
                     <div
                         className="prose prose-slate prose-headings:font-bold prose-headings:text-slate-800 prose-p:text-slate-600 prose-p:leading-relaxed prose-li:text-slate-600 prose-blockquote:border-primary prose-blockquote:text-slate-600 prose-blockquote:italic max-w-none text-sm sm:text-base"
                         style={{ lineHeight: 1.8 }}
-                        dangerouslySetInnerHTML={{ __html: post.content }}
+                        dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(post.content) }}
                     />
 
                     {/* Action bar */}
